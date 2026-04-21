@@ -21,7 +21,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Tatouage numérique invisible par DCT + QIM"
     )
-    parser.add_argument("--input", required=True, help="Chemin de l'image hôte")
+    parser.add_argument(
+        "--input",
+        help="Path to the host image. If omitted, the program asks for it.",
+    )
     parser.add_argument(
         "--watermark-size",
         type=int,
@@ -64,6 +67,16 @@ def save_metrics(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def resolve_input_path(input_path: str | None) -> Path:
+    if input_path is None:
+        input_path = input("Enter the path to the host image: ").strip()
+
+    if not input_path:
+        raise ValueError("No input image path was provided.")
+
+    return Path(input_path).expanduser()
+
+
 def create_comparison_figure(
     host: np.ndarray,
     watermarked: np.ndarray,
@@ -92,11 +105,22 @@ def create_comparison_figure(
 
 
 def main() -> None:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+
+    try:
+        input_path = resolve_input_path(args.input)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    host = load_grayscale_image(args.input)
+    try:
+        host = load_grayscale_image(input_path)
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
+
     watermark = generate_watermark(args.watermark_size, args.seed)
 
     watermarked, selected_positions = insert_watermark(
@@ -144,7 +168,7 @@ def main() -> None:
 
     metrics_lines = [
         "=== Résultats du projet QIM/DCT ===",
-        f"Image d'entrée : {os.path.abspath(args.input)}",
+        f"Image d'entrée : {os.path.abspath(input_path)}",
         f"Taille watermark : {args.watermark_size} bits",
         f"Delta QIM : {args.delta}",
         f"Seed secrète : {args.seed}",

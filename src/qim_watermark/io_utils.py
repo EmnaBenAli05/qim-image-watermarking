@@ -7,9 +7,15 @@ import numpy as np
 
 
 def load_grayscale_image(path: str | Path) -> np.ndarray:
-    image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    image_path = Path(path).expanduser()
+
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+
+    image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if image is None:
-        raise FileNotFoundError(f"Impossible de lire l'image : {path}")
+        raise ValueError(f"The file is not a valid readable image: {image_path}")
+
     return image.astype(np.float32)
 
 
