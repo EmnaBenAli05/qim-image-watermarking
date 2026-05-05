@@ -44,6 +44,13 @@ requirements.txt # Dependencies
 pip install -r requirements.txt
 ```
 
+For local development and tests:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ---
 
 ## Usage
@@ -78,3 +85,33 @@ Generated files are saved in the output directory:
 - `attacked_jpeg.png`
 - `comparison.png`
 - `metrics.txt`
+
+---
+
+## Docker
+
+Build the Docker image:
+
+```bash
+docker build -t qim-watermark-project .
+```
+
+Run the default workflow:
+
+```bash
+docker run --rm qim-watermark-project
+```
+
+---
+
+## Tests
+
+```bash
+pytest
+```
+
+---
+
+## Azure Deployment
+
+See [docs/azure-deployment.md](docs/azure-deployment.md).

@@ -1,6 +1,9 @@
+venv/
 .venv/
 __pycache__/
 *.pyc
 outputs/
+.pytest_cache/
+.pytest_tmp/
 .vscode/
 .DS_Store
