@@ -12,3 +12,4 @@ def bit_error_rate(reference_bits: np.ndarray, extracted_bits: np.ndarray) -> fl
     if reference_bits.shape != extracted_bits.shape:
         raise ValueError("Les deux watermarks doivent avoir la même taille")
     return float(np.mean(reference_bits != extracted_bits))
+
