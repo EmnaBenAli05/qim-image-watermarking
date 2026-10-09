@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import main
+from main import resolve_input_path
 import sys
 import pytest 
 def test_main_writes_expected_outputs(tmp_path, monkeypatch):
