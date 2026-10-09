@@ -69,11 +69,13 @@ def save_metrics(path: Path, lines: list[str]) -> None:
 
 def resolve_input_path(input_path: str | None) -> Path:
     if input_path is None:
+        if not sys.stdin.isatty():
+            raise ValueError(
+                "No --input given and no interactive terminal available."
+            )
         input_path = input("Enter the path to the host image: ").strip()
-
     if not input_path:
         raise ValueError("No input image path was provided.")
-
     return Path(input_path).expanduser()
 
 
