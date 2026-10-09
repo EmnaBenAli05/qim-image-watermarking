@@ -1,13 +1,14 @@
 from __future__ import annotations
-
+ 
 import argparse
+import hashlib
 import os
 import sys
 from pathlib import Path
-
+ 
 import matplotlib.pyplot as plt
 import numpy as np
-
+ 
 from src.qim_watermark.attacks import add_gaussian_noise, jpeg_compress
 from src.qim_watermark.io_utils import load_grayscale_image, save_image
 from src.qim_watermark.metrics import bit_error_rate, compute_psnr
@@ -16,8 +17,8 @@ from src.qim_watermark.watermark import (
     generate_watermark,
     insert_watermark,
 )
-
-
+ 
+ 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Tatouage numérique invisible par DCT + QIM"
@@ -42,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed",
         type=int,
         default=1234,
-        help="Clé secrète / seed pseudo-aléatoire",
+        help="Public demo seed, used only if QIM_KEY is not set.",
     )
     parser.add_argument(
         "--jpeg-quality",
@@ -62,12 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Dossier de sortie",
     )
     return parser
-
-
+ 
+ 
 def save_metrics(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines), encoding="utf-8")
-
-
+ 
+ 
 def resolve_input_path(input_path: str | None) -> Path:
     if input_path is None:
         if not sys.stdin.isatty():
@@ -78,8 +79,21 @@ def resolve_input_path(input_path: str | None) -> Path:
     if not input_path:
         raise ValueError("No input image path was provided.")
     return Path(input_path).expanduser()
-
-
+ 
+ 
+def resolve_seed(cli_seed: int) -> tuple[int, str]:
+    """Return (seed, source). The secret key is read from QIM_KEY if set."""
+    secret = os.environ.get("QIM_KEY")
+    if secret:
+        digest = hashlib.sha256(secret.encode("utf-8")).digest()
+        return int.from_bytes(digest[:4], "big"), "environment variable QIM_KEY"
+    print(
+        "WARNING: QIM_KEY is not set; using the public demo seed (--seed).",
+        file=sys.stderr,
+    )
+    return cli_seed, "demo seed (NOT secret)"
+ 
+ 
 def create_comparison_figure(
     host: np.ndarray,
     watermarked: np.ndarray,
@@ -88,54 +102,55 @@ def create_comparison_figure(
     output_path: Path,
 ) -> None:
     fig = plt.figure(figsize=(10, 8))
-
+ 
     images = [
         (host, "Image hôte"),
         (watermarked, "Image tatouée"),
         (attacked_noise, "Après bruit gaussien"),
         (attacked_jpeg, "Après compression JPEG"),
     ]
-
+ 
     for i, (img, title) in enumerate(images, start=1):
         ax = fig.add_subplot(2, 2, i)
         ax.imshow(img, cmap="gray", vmin=0, vmax=255)
         ax.set_title(title)
         ax.axis("off")
-
+ 
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-
-
+ 
+ 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-
+ 
     try:
         input_path = resolve_input_path(args.input)
     except ValueError as exc:
         parser.error(str(exc))
-
+ 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-
+ 
     try:
         host = load_grayscale_image(input_path)
     except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))
-
-    watermark = generate_watermark(args.watermark_size, args.seed)
-
+ 
+    seed, key_source = resolve_seed(args.seed)
+    watermark = generate_watermark(args.watermark_size, seed)
+ 
     watermarked, selected_positions = insert_watermark(
         image=host,
         watermark_bits=watermark,
         delta=args.delta,
-        seed=args.seed,
+        seed=seed,
     )
-
+ 
     attacked_noise = add_gaussian_noise(watermarked, sigma=args.noise_sigma)
     attacked_jpeg = jpeg_compress(watermarked, quality=args.jpeg_quality)
-
+ 
     extracted_clean = extract_watermark(
         image=watermarked,
         positions=selected_positions,
@@ -151,16 +166,16 @@ def main() -> None:
         positions=selected_positions,
         delta=args.delta,
     )
-
+ 
     psnr_value = compute_psnr(host, watermarked)
     ber_clean = bit_error_rate(watermark, extracted_clean)
     ber_noise = bit_error_rate(watermark, extracted_noise)
     ber_jpeg = bit_error_rate(watermark, extracted_jpeg)
-
+ 
     save_image(output_dir / "watermarked.png", watermarked)
     save_image(output_dir / "attacked_noise.png", attacked_noise)
     save_image(output_dir / "attacked_jpeg.png", attacked_jpeg)
-
+ 
     create_comparison_figure(
         host,
         watermarked,
@@ -168,23 +183,23 @@ def main() -> None:
         attacked_jpeg,
         output_dir / "comparison.png",
     )
-
+ 
     metrics_lines = [
         "=== Résultats du projet QIM/DCT ===",
-        f"Image d'entrée : {os.path.abspath(input_path)}",
+        f"Image d'entrée : {input_path.name}",
         f"Taille watermark : {args.watermark_size} bits",
         f"Delta QIM : {args.delta}",
-        f"Seed secrète : {args.seed}",
+        f"Key source : {key_source}",
         f"PSNR (host vs watermarked) : {psnr_value:.4f} dB",
         f"BER sans attaque : {ber_clean:.4f}",
         f"BER après bruit gaussien : {ber_noise:.4f}",
         f"BER après compression JPEG : {ber_jpeg:.4f}",
     ]
     save_metrics(output_dir / "metrics.txt", metrics_lines)
-
+ 
     print("\n".join(metrics_lines))
     print(f"\nFichiers générés dans : {output_dir.resolve()}")
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
