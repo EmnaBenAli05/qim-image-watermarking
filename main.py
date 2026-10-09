@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
  
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
  
 from src.qim_watermark.attacks import add_gaussian_noise, jpeg_compress
@@ -101,7 +101,7 @@ def create_comparison_figure(
     attacked_jpeg: np.ndarray,
     output_path: Path,
 ) -> None:
-    fig = plt.figure(figsize=(10, 8))
+    fig = Figure(figsize=(10, 8))
  
     images = [
         (host, "Image hôte"),
@@ -118,7 +118,7 @@ def create_comparison_figure(
  
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
+    
  
  
 def main() -> None:
@@ -141,36 +141,37 @@ def main() -> None:
     seed, key_source = resolve_seed(args.seed)
     watermark = generate_watermark(args.watermark_size, seed)
  
-    watermarked, selected_positions = insert_watermark(
-        image=host,
-        watermark_bits=watermark,
-        delta=args.delta,
-        seed=seed,
-    )
+    try:
+        watermarked, _ = insert_watermark(
+            image=host,
+            watermark_bits=watermark,
+            delta=args.delta,
+            seed=seed,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
  
     attacked_noise = add_gaussian_noise(watermarked, sigma=args.noise_sigma)
     attacked_jpeg = jpeg_compress(watermarked, quality=args.jpeg_quality)
  
-    extracted_clean = extract_watermark(
-        image=watermarked,
-        positions=selected_positions,
-        delta=args.delta,
-    )
-    extracted_noise = extract_watermark(
-        image=attacked_noise,
-        positions=selected_positions,
-        delta=args.delta,
-    )
-    extracted_jpeg = extract_watermark(
-        image=attacked_jpeg,
-        positions=selected_positions,
-        delta=args.delta,
-    )
+    def extract(image: np.ndarray, key: int = seed) -> np.ndarray:
+        return extract_watermark(
+            image=image,
+            watermark_size=args.watermark_size,
+            delta=args.delta,
+            seed=key,
+        )
+ 
+    extracted_clean = extract(watermarked)
+    extracted_noise = extract(attacked_noise)
+    extracted_jpeg = extract(attacked_jpeg)
+    extracted_wrong_key = extract(watermarked, key=seed + 1)
  
     psnr_value = compute_psnr(host, watermarked)
     ber_clean = bit_error_rate(watermark, extracted_clean)
     ber_noise = bit_error_rate(watermark, extracted_noise)
     ber_jpeg = bit_error_rate(watermark, extracted_jpeg)
+    ber_wrong_key = bit_error_rate(watermark, extracted_wrong_key)
  
     save_image(output_dir / "watermarked.png", watermarked)
     save_image(output_dir / "attacked_noise.png", attacked_noise)
@@ -194,6 +195,7 @@ def main() -> None:
         f"BER sans attaque : {ber_clean:.4f}",
         f"BER après bruit gaussien : {ber_noise:.4f}",
         f"BER après compression JPEG : {ber_jpeg:.4f}",
+        f"BER avec une mauvaise clé : {ber_wrong_key:.4f}",
     ]
     save_metrics(output_dir / "metrics.txt", metrics_lines)
  
