@@ -22,7 +22,7 @@ jobs:
       matrix:
         python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
  
       - uses: actions/setup-python@v6
         with:
@@ -43,7 +43,7 @@ jobs:
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
  
       # Optional: authenticated pulls avoid Docker Hub "429 Too Many Requests".
       # Skipped silently when the DOCKERHUB_* secrets are not configured.
