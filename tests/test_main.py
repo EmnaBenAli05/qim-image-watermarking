@@ -1,17 +1,17 @@
 from __future__ import annotations
-
+ 
 import sys
 from pathlib import Path
-
+ 
 import pytest
-
+ 
 import main
 from main import resolve_input_path
-
+ 
 HOST_IMAGE = Path(__file__).resolve().parent.parent / "test_assets" / "host.png"
-
-
-def run_main(monkeypatch, output_dir: Path) -> str:
+ 
+ 
+def run_main(monkeypatch, output_dir: Path, *extra_args: str) -> str:
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -22,72 +22,108 @@ def run_main(monkeypatch, output_dir: Path) -> str:
             "64",
             "--output-dir",
             str(output_dir),
+            *extra_args,
         ],
     )
     main.main()
     return (output_dir / "metrics.txt").read_text(encoding="utf-8")
-
-
+ 
+ 
 def test_main_writes_expected_outputs(tmp_path, monkeypatch):
     monkeypatch.setenv("QIM_KEY", "my secret phrase")
     output_dir = tmp_path / "outputs"
-
+ 
     metrics = run_main(monkeypatch, output_dir)
-
+ 
     assert (output_dir / "watermarked.png").is_file()
     assert (output_dir / "attacked_noise.png").is_file()
     assert (output_dir / "attacked_jpeg.png").is_file()
     assert (output_dir / "comparison.png").is_file()
     assert "PSNR" in metrics
-    assert "BER sans attaque" in metrics
+    assert "BER sans attaque : 0.0000" in metrics
+    assert "mauvaise clé" in metrics
     assert "Key source" in metrics
-
-
+    assert "Méthode : block" in metrics
+ 
+ 
+def test_main_global_method_still_works(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIM_KEY", "my secret phrase")
+ 
+    metrics = run_main(monkeypatch, tmp_path / "outputs", "--method", "global")
+ 
+    assert "Méthode : global" in metrics
+    assert "BER sans attaque : 0.0000" in metrics
+ 
+ 
 def test_main_does_not_leak_secret_key(tmp_path, monkeypatch):
     secret = "my secret phrase"
     monkeypatch.setenv("QIM_KEY", secret)
     derived_seed, _ = main.resolve_seed(0)
-
+ 
     metrics = run_main(monkeypatch, tmp_path / "outputs")
-
+ 
     assert secret not in metrics
     assert str(derived_seed) not in metrics
     assert "Seed" not in metrics
     assert "environment variable QIM_KEY" in metrics
-
-
+ 
+ 
+@pytest.mark.parametrize(
+    "bad_args",
+    [
+        ["--delta", "-5"],
+        ["--delta", "0"],
+        ["--redundancy", "0"],
+        ["--jpeg-quality", "150"],
+        ["--design-quality", "0"],
+        ["--noise-sigma", "-1"],
+    ],
+)
+def test_main_rejects_invalid_arguments(tmp_path, monkeypatch, bad_args):
+    monkeypatch.setenv("QIM_KEY", "my secret phrase")
+    with pytest.raises(SystemExit):
+        run_main(monkeypatch, tmp_path / "outputs", *bad_args)
+ 
+ 
+def test_main_rejects_watermark_larger_than_capacity(tmp_path, monkeypatch):
+    monkeypatch.setenv("QIM_KEY", "my secret phrase")
+    with pytest.raises(SystemExit):
+        run_main(monkeypatch, tmp_path / "outputs", "--watermark-size", "999999")
+ 
+ 
 def test_resolve_input_path_uses_given_value():
     assert resolve_input_path("a/b.png").name == "b.png"
-
-
+ 
+ 
 def test_resolve_input_path_rejects_empty_prompt(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "   ")
     with pytest.raises(ValueError):
         resolve_input_path(None)
-
-
+ 
+ 
 def test_resolve_input_path_rejects_non_interactive(monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     with pytest.raises(ValueError):
         resolve_input_path(None)
-
-
+ 
+ 
 def test_resolve_seed_uses_env_key(monkeypatch):
     monkeypatch.setenv("QIM_KEY", "my secret phrase")
     seed, source = main.resolve_seed(42)
     assert seed != 42
     assert "QIM_KEY" in source
-
-
+ 
+ 
 def test_resolve_seed_depends_only_on_env_key(monkeypatch):
     monkeypatch.setenv("QIM_KEY", "abc")
     assert main.resolve_seed(1)[0] == main.resolve_seed(2)[0]
-
-
+ 
+ 
 def test_resolve_seed_falls_back_to_demo(monkeypatch, capsys):
     monkeypatch.delenv("QIM_KEY", raising=False)
     seed, source = main.resolve_seed(42)
     assert seed == 42
     assert "NOT secret" in source
     assert "WARNING" in capsys.readouterr().err
+ 

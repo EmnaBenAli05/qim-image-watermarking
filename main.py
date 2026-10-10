@@ -6,10 +6,14 @@ import os
 import sys
 from pathlib import Path
  
-from matplotlib.figure import Figure
 import numpy as np
+from matplotlib.figure import Figure
  
 from src.qim_watermark.attacks import add_gaussian_noise, jpeg_compress
+from src.qim_watermark.block_watermark import (
+    extract_block_watermark,
+    insert_block_watermark,
+)
 from src.qim_watermark.io_utils import load_grayscale_image, save_image
 from src.qim_watermark.metrics import bit_error_rate, compute_psnr
 from src.qim_watermark.watermark import (
@@ -17,6 +21,33 @@ from src.qim_watermark.watermark import (
     generate_watermark,
     insert_watermark,
 )
+ 
+ 
+def positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if number <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value}")
+    return number
+ 
+ 
+def positive_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a number") from None
+    if not number > 0:
+        raise argparse.ArgumentTypeError(f"must be a positive number, got {value}")
+    return number
+ 
+ 
+def jpeg_quality(value: str) -> int:
+    number = positive_int(value)
+    if number > 100:
+        raise argparse.ArgumentTypeError("JPEG quality must be between 1 and 100")
+    return number
  
  
 def build_parser() -> argparse.ArgumentParser:
@@ -28,16 +59,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the host image. If omitted, the program asks for it.",
     )
     parser.add_argument(
+        "--method",
+        choices=["block", "global"],
+        default="block",
+        help="block: JPEG-aware 8x8 block DCT (default). global: whole-image DCT.",
+    )
+    parser.add_argument(
         "--watermark-size",
-        type=int,
+        type=positive_int,
         default=1024,
         help="Nombre de bits du watermark",
     )
     parser.add_argument(
         "--delta",
-        type=float,
+        type=positive_float,
         default=18.0,
-        help="Pas de quantification QIM",
+        help="QIM step (global method only)",
+    )
+    parser.add_argument(
+        "--design-quality",
+        type=jpeg_quality,
+        default=40,
+        help="Lowest JPEG quality the watermark must survive (block method only)",
+    )
+    parser.add_argument(
+        "--redundancy",
+        type=positive_int,
+        default=4,
+        help="Number of coefficients carrying each bit (block method only)",
     )
     parser.add_argument(
         "--seed",
@@ -47,13 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--jpeg-quality",
-        type=int,
+        type=jpeg_quality,
         default=50,
         help="Qualité JPEG pour l'attaque de compression",
     )
     parser.add_argument(
         "--noise-sigma",
-        type=float,
+        type=positive_float,
         default=8.0,
         help="Écart-type du bruit gaussien",
     )
@@ -94,6 +143,51 @@ def resolve_seed(cli_seed: int) -> tuple[int, str]:
     return cli_seed, "demo seed (NOT secret)"
  
  
+def build_codec(args: argparse.Namespace, seed: int):
+    """Return (embed, extract) for the chosen method.
+ 
+    extract(image, key) is blind: it only needs the image, the parameters and
+    the key. A different key is used to measure the wrong-key BER.
+    """
+    if args.method == "block":
+ 
+        def embed(image: np.ndarray, bits: np.ndarray) -> np.ndarray:
+            return insert_block_watermark(
+                image,
+                bits,
+                seed,
+                quality=args.design_quality,
+                redundancy=args.redundancy,
+            )
+ 
+        def extract(image: np.ndarray, key: int = seed) -> np.ndarray:
+            return extract_block_watermark(
+                image,
+                args.watermark_size,
+                key,
+                quality=args.design_quality,
+                redundancy=args.redundancy,
+            )
+ 
+    else:
+ 
+        def embed(image: np.ndarray, bits: np.ndarray) -> np.ndarray:
+            watermarked, _ = insert_watermark(
+                image=image, watermark_bits=bits, delta=args.delta, seed=seed
+            )
+            return watermarked
+ 
+        def extract(image: np.ndarray, key: int = seed) -> np.ndarray:
+            return extract_watermark(
+                image=image,
+                watermark_size=args.watermark_size,
+                delta=args.delta,
+                seed=key,
+            )
+ 
+    return embed, extract
+ 
+ 
 def create_comparison_figure(
     host: np.ndarray,
     watermarked: np.ndarray,
@@ -118,7 +212,6 @@ def create_comparison_figure(
  
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
-    
  
  
 def main() -> None:
@@ -140,32 +233,20 @@ def main() -> None:
  
     seed, key_source = resolve_seed(args.seed)
     watermark = generate_watermark(args.watermark_size, seed)
+    embed, extract = build_codec(args, seed)
  
     try:
-        watermarked, _ = insert_watermark(
-            image=host,
-            watermark_bits=watermark,
-            delta=args.delta,
-            seed=seed,
-        )
+        watermarked = embed(host, watermark)
     except ValueError as exc:
         parser.error(str(exc))
  
     attacked_noise = add_gaussian_noise(watermarked, sigma=args.noise_sigma)
     attacked_jpeg = jpeg_compress(watermarked, quality=args.jpeg_quality)
  
-    def extract(image: np.ndarray, key: int = seed) -> np.ndarray:
-        return extract_watermark(
-            image=image,
-            watermark_size=args.watermark_size,
-            delta=args.delta,
-            seed=key,
-        )
- 
     extracted_clean = extract(watermarked)
     extracted_noise = extract(attacked_noise)
     extracted_jpeg = extract(attacked_jpeg)
-    extracted_wrong_key = extract(watermarked, key=seed + 1)
+    extracted_wrong_key = extract(watermarked, seed + 1)
  
     psnr_value = compute_psnr(host, watermarked)
     ber_clean = bit_error_rate(watermark, extracted_clean)
@@ -185,11 +266,20 @@ def main() -> None:
         output_dir / "comparison.png",
     )
  
+    if args.method == "block":
+        method_line = (
+            f"Qualité JPEG visée : {args.design_quality} "
+            f"(redondance {args.redundancy})"
+        )
+    else:
+        method_line = f"Delta QIM : {args.delta}"
+ 
     metrics_lines = [
         "=== Résultats du projet QIM/DCT ===",
         f"Image d'entrée : {input_path.name}",
+        f"Méthode : {args.method}",
         f"Taille watermark : {args.watermark_size} bits",
-        f"Delta QIM : {args.delta}",
+        method_line,
         f"Key source : {key_source}",
         f"PSNR (host vs watermarked) : {psnr_value:.4f} dB",
         f"BER sans attaque : {ber_clean:.4f}",

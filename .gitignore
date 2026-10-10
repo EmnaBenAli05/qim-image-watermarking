@@ -7,3 +7,5 @@ outputs/
 .pytest_tmp/
 .vscode/
 .DS_Store
+camera_sample.png
+outputs_photo/
