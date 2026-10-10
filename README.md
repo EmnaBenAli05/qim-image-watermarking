@@ -1,7 +1,5 @@
 # QIM Image Watermarking
 
-![CI](https://github.com/EmnaBenAli05/qim-image-watermarking/actions/workflows/tests.yml/badge.svg)
-
 Invisible, key-based watermarking of grayscale images with the Discrete Cosine Transform (DCT) and Quantization Index Modulation (QIM), in Python. The project embeds a binary watermark, simulates attacks (Gaussian noise, JPEG compression), extracts the watermark blindly and measures invisibility (PSNR) and robustness (BER).
 
 ## How it works
