@@ -101,7 +101,6 @@ GitHub Actions runs the tests on Python 3.10 and 3.12, builds the Docker image, 
 - Results come from one standard photograph and one synthetic image; other images will differ.
 - The key is derived on 32 bits (brute-forceable) and the message is generated from the key: fine for an educational project, not for production.
 
-See also [docs/azure-deployment.md](docs/azure-deployment.md).
 ## Azure Deployment
 
 See [docs/azure-deployment.md](docs/azure-deployment.md).
